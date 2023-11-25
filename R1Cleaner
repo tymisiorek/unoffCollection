@@ -1,0 +1,152 @@
+'''
+This script writes potential EIN numbers for a number of R1 Universities, and then attempts to clean out the incorrect (in this case not incorrect always) numbers,
+and return a dictionary with each school as a dictionary key, and their EIN numbers as the values. However, the dataset used didn't contain every EIN number, so 
+it returned a dictionary with many schools still having multiple potential numbers. Takes about 1 minute to run at the current state of it
+'''
+
+
+import csv
+import requests
+import time
+import json
+import strsimpy
+from strsimpy.normalized_levenshtein import NormalizedLevenshtein
+from bs4 import BeautifulSoup
+
+
+#defining url and other globals
+url = "https://projects.propublica.org/nonprofits/organizations/"
+urlmod = "https://projects.propublica.org"
+schoolDict = {}
+r1List = []
+normal_levenshtein = NormalizedLevenshtein()
+extDict = {}
+
+
+def r1convert():
+    #Open the R1 School names and put into variable
+    r = open("R1Names.txt", "r")
+    rstring = r.readlines()
+    for x in rstring:
+        x = x.strip()
+        x = x.split(",")
+        r1List.append(x[0])
+    #print(r1List)
+
+
+def fillschoolDict():
+    #Open the csv of eins and put into a variable
+    f = open("universitysheet.csv", "r")
+    einList = f.readlines()
+
+    #Open and read the large 2022 990 Data
+    f1 = open("22extract990.csv", "r")
+    full990Dict = {}
+    list990 = f1.readlines()
+    for x in list990:
+        x = x.strip()
+        x = x.split(",")
+        full990Dict[x[1]] = x[2:]
+    #print(full990Dict)
+    #Turn the raw string of school/ein and turn into a readable list
+    for x in einList:
+        #Splitting the string into a list, where one element is the school name, and the other is the EIN codes
+        x = x.split("]", 1)[0]
+        x = x.split(",", 1)
+        #Clean the list by removing the brackets and quotes from the elements
+        x[1] = x[1].replace("[", "")
+        x[1] = x[1].replace("\"", "")
+        for j in r1List:
+            #If a School in the r1 list appears on the einlist, then add to dictionary, with school as key and eins as value
+            #print(normal_levenshtein.distance(j.upper(), x[0]))
+            if(j.upper() == x[0]):
+                schoolDict[j] = x[1]
+
+
+#Here, we use normalized levenshtein to compare string similarity, where a score of 0 indicates equal strings, and 1 is completely different
+#This function has an awful time complexity so i'm throwing it out for now
+def checkSimilar():
+    #This array will hold schools that didn't get put into schoolDict
+    notInList = []
+
+
+'''
+procExtract() goes through the file 22extract990, which is a csv containing 990 information for around 300,000 nonprofits. It creates a dictionary, with the 
+EIN number of each nonprofit as the key, and the value being their total revenue for 2022.
+'''
+def procExtract():
+    with open("22extract990.csv") as csvfile:
+        data = csv.reader(csvfile)
+        #keys = next(data)
+        #Go through the csv, making the keys EIN numbers, and the value the total revenue corresponding to that EIN
+        for row in data:
+            key = row[1]
+            #index 143 should be the total revenue of the nonprofit
+            values = row[143]
+            extDict[key] = values
+    #print(extDict["996010158"])
+    #print(len(extDict))    
+    
+    
+
+#Now we need to go through every element with multiple ein numbers and figure out which one is correct. Afterwards verify the entire list.
+def chooseEIN(): 
+    counter = 0
+    for x in schoolDict:
+        greatestRev = 0
+        multipleListPre = []
+        multipleList = []
+        numbers = 1
+        for char in schoolDict[x]:
+            if(char == ","):
+                numbers+=1
+        #Only add to the multipleList if the school has more than one EIN number listed with it
+        if(numbers > 1):
+            multipleListPre = schoolDict[x]
+        print(multipleListPre)
+        #Format the our list so we can iterate through it easier
+        for j in multipleListPre:
+            j = multipleListPre.split(",")
+            multipleList.append(j)
+        #Go through the list, and for each EIN number, look at the total revenue associated with that company. Only keep the EIN with the highest associated revenue
+        for i in multipleList:
+            #Each individual EIN number for the schools with multiple are in j.
+            for j in i:
+                if((j in extDict.keys()) and (int(extDict[j]) > int(greatestRev))):
+                    counter+=1
+                    print("Reached this area: " , counter , "times")
+                    print(x, j)
+                    greatestRev = extDict[j]
+                    #schoolDict.update({x,j})
+                    schoolDict[x] = j
+                    print(schoolDict[x])
+                    #print(f"schoolDict[{x}] is now {schoolDict[x]}")
+                #if(str(multipleList[i]) == extDict[str(i)]):
+
+def writeToFile():
+    with open('halfverifiedlist.txt', 'w') as file:
+        file.write(json.dumps(schoolDict))
+            
+
+
+
+
+
+
+
+#Don't write methods past this line. This is where we'll call everything.
+print("-------------Main Method Outputs-------------")
+
+r1convert()
+print("Loading.....")
+fillschoolDict()
+print("School Dict Filled.")
+procExtract()
+print("procExtract Finsihed.")
+chooseEIN()
+print("chooseEIN Finsihed.")
+writeToFile()
+print("Output written to text file. Done.")
+# print(len(schoolDict))
+# print(schoolDict)
+# print(type(normal_levenshtein.distance("University of Delaware", "University-Of-Delaware")))
